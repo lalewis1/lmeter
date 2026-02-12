@@ -3,7 +3,7 @@
 HTTPX-based load test utility that simulates 30 users making 5 requests each
 to the endpoints specified in prez_endpoint.txt and fuseki_endpoint.txt.
 For prez endpoint: uses URL-based search with varied search terms.
-For fuseki endpoint: uses SPARQL queries with templated search terms.
+For fuseki endpoint: uses SPARQL queries with templated search terms (constructQuery.rq and countQuery.rq).
 """
 
 import asyncio
@@ -28,17 +28,20 @@ async def read_endpoint(filename):
         return None
 
 
-async def read_query_template():
-    """Read the SPARQL query template from query.rq"""
+async def read_query_templates():
+    """Read the SPARQL query templates from constructQuery.rq and countQuery.rq"""
     try:
-        with open("query.rq", "r") as f:
-            return f.read()
-    except FileNotFoundError:
-        print("Error: query.rq not found")
-        return None
+        with open("constructQuery.rq", "r") as f:
+            construct_template = f.read()
+        with open("countQuery.rq", "r") as f:
+            count_template = f.read()
+        return construct_template, count_template
+    except FileNotFoundError as e:
+        print(f"Error: {e.filename} not found")
+        return None, None
     except Exception as e:
-        print(f"Error reading query.rq: {e}")
-        return None
+        print(f"Error reading query templates: {e}")
+        return None, None
 
 
 def modify_search_term(url, suffix_length=4):
@@ -75,7 +78,7 @@ def generate_sparql_query(template_content, search_term):
 
 
 async def make_request(
-    client, url, user_id, request_num, request_type="url", query_template=None
+    client, url, user_id, request_num, request_type="url", query_templates=None
 ):
     """Make a single HTTP request and return timing information"""
     if request_type == "url":
@@ -89,8 +92,10 @@ async def make_request(
             random.choices(string.ascii_uppercase + string.digits, k=term_length)
         )
 
-        # Generate SPARQL query
-        sparql_query = generate_sparql_query(query_template, search_term)
+        # Generate both SPARQL queries
+        construct_template, count_template = query_templates
+        construct_query = generate_sparql_query(construct_template, search_term)
+        count_query = generate_sparql_query(count_template, search_term)
         request_url = url
         print_url = f"{url} [search_term={search_term}]"
     else:
@@ -100,22 +105,33 @@ async def make_request(
         start_time = asyncio.get_event_loop().time()
 
         if request_type == "sparql":
-            # For SPARQL endpoint, send POST request with query
+            # For SPARQL endpoint, send both queries sequentially
             headers = {
                 "Content-Type": "application/sparql-query",
                 "Accept": "application/json",
             }
-            response = await client.post(
-                request_url, content=sparql_query, headers=headers
+            
+            # Execute construct query
+            response1 = await client.post(
+                request_url, content=construct_query, headers=headers
             )
+            
+            # Execute count query
+            response2 = await client.post(
+                request_url, content=count_query, headers=headers
+            )
+            
+            # Use the combined duration and average status
+            end_time = asyncio.get_event_loop().time()
+            duration = end_time - start_time
+            status = (response1.status_code + response2.status_code) // 2
+
         else:
             # For URL endpoint, send GET request
             response = await client.get(request_url)
-
-        end_time = asyncio.get_event_loop().time()
-
-        duration = end_time - start_time
-        status = response.status_code
+            end_time = asyncio.get_event_loop().time()
+            duration = end_time - start_time
+            status = response.status_code
 
         print(
             f"User {user_id:2d} Request {request_num:2d}: {status} in {duration:.3f}s - {print_url}"
@@ -146,7 +162,7 @@ async def make_request(
 
 
 async def user_simulation(
-    user_id, base_url, requests_per_user, request_type="url", query_template=None
+    user_id, base_url, requests_per_user, request_type="url", query_templates=None
 ):
     """Simulate a single user making multiple requests"""
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -154,7 +170,7 @@ async def user_simulation(
 
         for request_num in range(1, requests_per_user + 1):
             result = await make_request(
-                client, base_url, user_id, request_num, request_type, query_template
+                client, base_url, user_id, request_num, request_type, query_templates
             )
             results.append(result)
 
@@ -174,11 +190,11 @@ async def run_single_load_test(
         print(f"Skipping {test_name} test - endpoint file not found or empty")
         return None
 
-    query_template = None
+    query_templates = None
     if request_type == "sparql":
-        query_template = await read_query_template()
-        if not query_template:
-            print(f"Skipping {test_name} test - query template not found")
+        query_templates = await read_query_templates()
+        if not all(query_templates):
+            print(f"Skipping {test_name} test - query templates not found")
             return None
 
     print(f"\n{'='*80}")
@@ -188,6 +204,8 @@ async def run_single_load_test(
         f"Starting {test_name} load test with {num_users} users, {requests_per_user} requests each"
     )
     print(f"Base URL: {base_url}")
+    if request_type == "sparql":
+        print("Using both constructQuery.rq and countQuery.rq templates")
     print("-" * 80)
 
     # Create tasks for all users
@@ -195,7 +213,7 @@ async def run_single_load_test(
     for user_id in range(1, num_users + 1):
         task = asyncio.create_task(
             user_simulation(
-                user_id, base_url, requests_per_user, request_type, query_template
+                user_id, base_url, requests_per_user, request_type, query_templates
             )
         )
         tasks.append(task)
@@ -221,6 +239,8 @@ async def run_single_load_test(
     print(f"Total requests: {len(flat_results)}")
     print(f"Successful requests: {len(successful_requests)}")
     print(f"Failed requests: {len(failed_requests)}")
+    if request_type == "sparql":
+        print(f"Note: Each request executes 2 SPARQL queries (construct + count)")
 
     if durations:
         print(f"Average response time: {sum(durations) / len(durations):.3f}s")
