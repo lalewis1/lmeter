@@ -1,0 +1,27 @@
+CONSTRUCT {
+  ?term ?prezAnotProp ?annotation .
+}
+WHERE {
+  VALUES ?term {
+    {% for iri in iris %}
+      <{{ iri }}>
+    {% endfor %}
+  }
+  VALUES (?prop ?prezAnotProp) {
+    (<http://www.w3.org/2004/02/skos/core#prefLabel> <https://prez.dev/label>)
+    (<http://purl.org/dc/terms/title> <https://prez.dev/label>)
+    (<http://www.w3.org/2000/01/rdf-schema#label> <https://prez.dev/label>)
+    (<https://schema.org/name> <https://prez.dev/label>)
+    (<http://www.w3.org/2004/02/skos/core#definition> <https://prez.dev/description>)
+    (<http://purl.org/dc/terms/description> <https://prez.dev/description>)
+    (<https://schema.org/description> <https://prez.dev/description>)
+    (<http://purl.org/dc/terms/provenance> <https://prez.dev/provenance>)
+    (<http://www.w3.org/ns/sosa/hasSimpleResult> <https://prez.dev/value>)
+    (<https://w3id.org/tern/ontologies/tern/hasSimpleValue> <https://prez.dev/value>)
+    (<http://www.w3.org/1999/02/22-rdf-syntax-ns#value> <https://prez.dev/value>)
+    (<https://schema.org/color> <https://schema.org/color>)
+    (<http://purl.org/linked-data/registry#status> <http://purl.org/linked-data/registry#status>)
+  }
+  ?term ?prop ?annotation .
+  FILTER (lang(?annotation) IN ("en", "") || isURI(?annotation))
+}

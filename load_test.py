@@ -7,12 +7,16 @@ For fuseki endpoint: uses SPARQL queries with templated search terms (constructQ
 """
 
 import asyncio
+import logging
 import random
 import string
+from datetime import datetime
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from io import StringIO
 
 import httpx
 from jinja2 import Template
+from rdflib import Graph
 
 
 async def read_endpoint(filename):
@@ -21,27 +25,50 @@ async def read_endpoint(filename):
         with open(filename, "r") as f:
             return f.read().strip()
     except FileNotFoundError:
-        print(f"Error: {filename} not found")
+        logging.error(f"Error: {filename} not found")
         return None
     except Exception as e:
-        print(f"Error reading {filename}: {e}")
+        logging.error(f"Error reading {filename}: {e}")
         return None
 
 
 async def read_query_templates():
-    """Read the SPARQL query templates from constructQuery.rq and countQuery.rq"""
+    """Read the SPARQL query templates from constructQuery.rq, countQuery.rq, and anotQuery.rq"""
     try:
         with open("constructQuery.rq", "r") as f:
             construct_template = f.read()
         with open("countQuery.rq", "r") as f:
             count_template = f.read()
-        return construct_template, count_template
+        with open("anotQuery.rq", "r") as f:
+            anot_template = f.read()
+        return construct_template, count_template, anot_template
     except FileNotFoundError as e:
-        print(f"Error: {e.filename} not found")
-        return None, None
+        logging.error(f"Error: {e.filename} not found")
+        return None, None, None
     except Exception as e:
-        print(f"Error reading query templates: {e}")
-        return None, None
+        logging.error(f"Error reading query templates: {e}")
+        return None, None, None
+
+
+def setup_logging():
+    """
+    Setup logging to both console and timestamped log file
+    """
+    # Create a timestamp for the log file
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    log_filename = f"load_test_{timestamp}.log"
+    
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_filename),
+            logging.StreamHandler()
+        ]
+    )
+    
+    return log_filename
 
 
 def modify_search_term(url, suffix_length=4):
@@ -77,6 +104,40 @@ def generate_sparql_query(template_content, search_term):
     return template.render(search_term=search_term)
 
 
+def parse_construct_results(response_text):
+    """
+    Parse the CONSTRUCT query results to extract distinct IRIs
+    Returns a set of unique IRIs found in subject, predicate, and object positions
+    """
+    try:
+        # Parse the response as N-Triples
+        graph = Graph()
+        graph.parse(source=StringIO(response_text), format="nt")
+        
+        # Extract all unique IRIs from the graph
+        iris = set()
+        for subject, predicate, obj in graph:
+            if subject and str(subject).startswith('http'):
+                iris.add(str(subject))
+            if predicate and str(predicate).startswith('http'):
+                iris.add(str(predicate))
+            if obj and str(obj).startswith('http'):
+                iris.add(str(obj))
+        
+        return list(iris)
+    except Exception as e:
+        logging.error(f"Error parsing construct results: {e}")
+        return []
+
+
+def generate_annotation_query(template_content, iris):
+    """
+    Generate an annotation SPARQL query by templating the list of IRIs
+    """
+    template = Template(template_content)
+    return template.render(iris=iris)
+
+
 async def make_request(
     client, url, user_id, request_num, request_type="url", query_templates=None
 ):
@@ -92,8 +153,8 @@ async def make_request(
             random.choices(string.ascii_uppercase + string.digits, k=term_length)
         )
 
-        # Generate both SPARQL queries
-        construct_template, count_template = query_templates
+        # Generate all SPARQL queries
+        construct_template, count_template, anot_template = query_templates
         construct_query = generate_sparql_query(construct_template, search_term)
         count_query = generate_sparql_query(count_template, search_term)
         request_url = url
@@ -105,10 +166,10 @@ async def make_request(
         start_time = asyncio.get_event_loop().time()
 
         if request_type == "sparql":
-            # For SPARQL endpoint, send both queries sequentially
+            # For SPARQL endpoint, send construct, count, and annotation queries sequentially
             headers = {
                 "Content-Type": "application/sparql-query",
-                "Accept": "application/json",
+                "Accept": "application/n-triples",  # Request N-Triples for easier parsing
             }
             
             # Execute construct query
@@ -116,15 +177,41 @@ async def make_request(
                 request_url, content=construct_query, headers=headers
             )
             
+            # Parse construct results to get IRIs for annotation query
+            iris = []
+            if response1.status_code == 200:
+                iris = parse_construct_results(response1.text)
+            
             # Execute count query
+            headers_count = {
+                "Content-Type": "application/sparql-query",
+                "Accept": "application/json",
+            }
             response2 = await client.post(
-                request_url, content=count_query, headers=headers
+                request_url, content=count_query, headers=headers_count
             )
+            
+            # Execute annotation query if we have IRIs
+            response3 = None
+            if iris:
+                anot_query = generate_annotation_query(anot_template, iris)
+                headers_anot = {
+                    "Content-Type": "application/sparql-query",
+                    "Accept": "application/n-triples",
+                }
+                response3 = await client.post(
+                    request_url, content=anot_query, headers=headers_anot
+                )
             
             # Use the combined duration and average status
             end_time = asyncio.get_event_loop().time()
             duration = end_time - start_time
-            status = (response1.status_code + response2.status_code) // 2
+            
+            # Calculate average status code
+            status_codes = [response1.status_code, response2.status_code]
+            if response3:
+                status_codes.append(response3.status_code)
+            status = sum(status_codes) // len(status_codes)
 
         else:
             # For URL endpoint, send GET request
@@ -133,23 +220,30 @@ async def make_request(
             duration = end_time - start_time
             status = response.status_code
 
-        print(
+        logging.info(
             f"User {user_id:2d} Request {request_num:2d}: {status} in {duration:.3f}s - {print_url}"
         )
 
-        return {
+        result = {
             "user_id": user_id,
             "request_num": request_num,
             "status": status,
             "duration": duration,
             "url": print_url,
         }
+        
+        # Add additional info for SPARQL requests
+        if request_type == "sparql":
+            result["iris_found"] = len(iris)
+            result["annotation_query_executed"] = response3 is not None
+        
+        return result
 
     except Exception as e:
         end_time = asyncio.get_event_loop().time()
         duration = end_time - asyncio.get_event_loop().time()
 
-        print(f"User {user_id:2d} Request {request_num:2d}: ERROR - {str(e)}")
+        logging.error(f"User {user_id:2d} Request {request_num:2d}: ERROR - {str(e)}")
 
         return {
             "user_id": user_id,
@@ -197,16 +291,16 @@ async def run_single_load_test(
             print(f"Skipping {test_name} test - query templates not found")
             return None
 
-    print(f"\n{'='*80}")
-    print(f"{test_name.upper()} LOAD TEST")
-    print(f"{'='*80}")
-    print(
+    logging.info(f"{'='*80}")
+    logging.info(f"{test_name.upper()} LOAD TEST")
+    logging.info(f"{'='*80}")
+    logging.info(
         f"Starting {test_name} load test with {num_users} users, {requests_per_user} requests each"
     )
-    print(f"Base URL: {base_url}")
+    logging.info(f"Base URL: {base_url}")
     if request_type == "sparql":
-        print("Using both constructQuery.rq and countQuery.rq templates")
-    print("-" * 80)
+        logging.info("Using constructQuery.rq, countQuery.rq, and anotQuery.rq templates")
+    logging.info("-" * 80)
 
     # Create tasks for all users
     tasks = []
@@ -233,26 +327,38 @@ async def run_single_load_test(
 
     durations = [r["duration"] for r in successful_requests]
 
-    print("\n" + "=" * 80)
-    print(f"{test_name.upper()} LOAD TEST SUMMARY")
-    print("=" * 80)
-    print(f"Total requests: {len(flat_results)}")
-    print(f"Successful requests: {len(successful_requests)}")
-    print(f"Failed requests: {len(failed_requests)}")
+    logging.info("" + "=" * 80)
+    logging.info(f"{test_name.upper()} LOAD TEST SUMMARY")
+    logging.info("=" * 80)
+    logging.info(f"Total requests: {len(flat_results)}")
+    logging.info(f"Successful requests: {len(successful_requests)}")
+    logging.info(f"Failed requests: {len(failed_requests)}")
     if request_type == "sparql":
-        print(f"Note: Each request executes 2 SPARQL queries (construct + count)")
+        logging.info(f"Note: Each request executes 3 SPARQL queries (construct + count + annotation)")
 
     if durations:
-        print(f"Average response time: {sum(durations) / len(durations):.3f}s")
-        print(f"Minimum response time: {min(durations):.3f}s")
-        print(f"Maximum response time: {max(durations):.3f}s")
+        logging.info(f"Average response time: {sum(durations) / len(durations):.3f}s")
+        logging.info(f"Minimum response time: {min(durations):.3f}s")
+        logging.info(f"Maximum response time: {max(durations):.3f}s")
 
     if failed_requests:
-        print("\nFailed requests details:")
+        logging.info("Failed requests details:")
         for result in failed_requests:
-            print(
+            logging.info(
                 f"  User {result['user_id']} Request {result['request_num']}: {result['error']}"
             )
+    
+    # Additional stats for SPARQL requests
+    if request_type == "sparql":
+        successful_sparql_requests = [r for r in successful_requests if r.get("iris_found") is not None]
+        if successful_sparql_requests:
+            total_iris = sum(r["iris_found"] for r in successful_sparql_requests)
+            avg_iris = total_iris / len(successful_sparql_requests)
+            annotation_queries = sum(1 for r in successful_sparql_requests if r.get("annotation_query_executed"))
+            
+            logging.info(f"SPARQL-specific statistics:")
+            logging.info(f"  Average IRIs found per request: {avg_iris:.1f}")
+            logging.info(f"  Annotation queries executed: {annotation_queries}/{len(successful_sparql_requests)}")
 
     return {
         "name": test_name,
@@ -270,8 +376,11 @@ async def run_load_test():
     num_users = 30
     requests_per_user = 5
 
-    print("Starting comprehensive load test")
-    print("=" * 80)
+    # Setup logging
+    log_filename = setup_logging()
+    logging.info("Starting comprehensive load test")
+    logging.info("=" * 80)
+    logging.info(f"Log file: {log_filename}")
 
     # Run prez endpoint test (URL-based)
     prez_results = await run_single_load_test(
@@ -292,25 +401,26 @@ async def run_load_test():
     )
 
     # Print overall summary
-    print(f"\n{'='*80}")
-    print("OVERALL LOAD TEST SUMMARY")
-    print("=" * 80)
+    logging.info(f"{'='*80}")
+    logging.info("OVERALL LOAD TEST SUMMARY")
+    logging.info("=" * 80)
 
     if prez_results:
-        print(f"\nPrez Endpoint Results:")
-        print(f"  Total requests: {prez_results['total_requests']}")
-        print(f"  Successful: {prez_results['successful_requests']}")
-        print(f"  Failed: {prez_results['failed_requests']}")
-        print(f"  Avg response time: {prez_results['avg_response_time']:.3f}s")
+        logging.info(f"Prez Endpoint Results:")
+        logging.info(f"  Total requests: {prez_results['total_requests']}")
+        logging.info(f"  Successful: {prez_results['successful_requests']}")
+        logging.info(f"  Failed: {prez_results['failed_requests']}")
+        logging.info(f"  Avg response time: {prez_results['avg_response_time']:.3f}s")
 
     if fuseki_results:
-        print(f"\nFuseki Endpoint Results:")
-        print(f"  Total requests: {fuseki_results['total_requests']}")
-        print(f"  Successful: {fuseki_results['successful_requests']}")
-        print(f"  Failed: {fuseki_results['failed_requests']}")
-        print(f"  Avg response time: {fuseki_results['avg_response_time']:.3f}s")
+        logging.info(f"Fuseki Endpoint Results:")
+        logging.info(f"  Total requests: {fuseki_results['total_requests']}")
+        logging.info(f"  Successful: {fuseki_results['successful_requests']}")
+        logging.info(f"  Failed: {fuseki_results['failed_requests']}")
+        logging.info(f"  Avg response time: {fuseki_results['avg_response_time']:.3f}s")
 
-    print(f"\nLoad test completed!")
+    logging.info(f"Load test completed!")
+    logging.info(f"Results saved to: {log_filename}")
 
 
 if __name__ == "__main__":
