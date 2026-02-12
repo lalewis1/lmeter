@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 HTTPX-based load test utility that simulates 30 users making 5 requests each
-to the endpoints specified in prez_endpoint.txt and fuseki_endpoint.txt.
-For prez endpoint: uses URL-based search with varied search terms.
+to the endpoints specified in prez_endpoint.txt, localhost_endpoint.txt, and fuseki_endpoint.txt.
+For prez and localhost endpoints: uses URL-based search with varied search terms.
 For fuseki endpoint: uses SPARQL queries with templated search terms (constructQuery.rq and countQuery.rq).
 """
 
@@ -372,7 +372,7 @@ async def run_single_load_test(
 
 
 async def run_load_test():
-    """Run the complete load test for both prez and fuseki endpoints"""
+    """Run the complete load test for prez, localhost, and fuseki endpoints"""
     num_users = 30
     requests_per_user = 5
 
@@ -386,6 +386,15 @@ async def run_load_test():
     prez_results = await run_single_load_test(
         "Prez Endpoint",
         "prez_endpoint.txt",
+        request_type="url",
+        num_users=num_users,
+        requests_per_user=requests_per_user,
+    )
+
+    # Run localhost endpoint test (URL-based) - same as prez but pointing to localhost
+    localhost_results = await run_single_load_test(
+        "Localhost Endpoint",
+        "localhost_endpoint.txt",
         request_type="url",
         num_users=num_users,
         requests_per_user=requests_per_user,
@@ -411,6 +420,13 @@ async def run_load_test():
         logging.info(f"  Successful: {prez_results['successful_requests']}")
         logging.info(f"  Failed: {prez_results['failed_requests']}")
         logging.info(f"  Avg response time: {prez_results['avg_response_time']:.3f}s")
+
+    if localhost_results:
+        logging.info(f"Localhost Endpoint Results:")
+        logging.info(f"  Total requests: {localhost_results['total_requests']}")
+        logging.info(f"  Successful: {localhost_results['successful_requests']}")
+        logging.info(f"  Failed: {localhost_results['failed_requests']}")
+        logging.info(f"  Avg response time: {localhost_results['avg_response_time']:.3f}s")
 
     if fuseki_results:
         logging.info(f"Fuseki Endpoint Results:")
