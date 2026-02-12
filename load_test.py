@@ -2,7 +2,7 @@
 """
 HTTPX-based load test utility that simulates 30 users making 5 requests each
 to the endpoints specified in prez_endpoint.txt, localhost_endpoint.txt, and fuseki_endpoint.txt.
-For prez and localhost endpoints: uses URL-based search with varied search terms, parses RDF responses for prez:count predicate.
+For prez and localhost endpoints: uses URL-based search with realistic search terms (1-2 letters + 1-4 digits like W001968, MN02), parses RDF responses for prez:count predicate.
 For fuseki endpoint: uses SPARQL queries with templated search terms (constructQuery.rq and countQuery.rq), parses count query results.
 Reports average/min/max response times and result counts for each test case.
 """
@@ -10,14 +10,15 @@ Reports average/min/max response times and result counts for each test case.
 import asyncio
 import logging
 import random
+import statistics
 import string
 from datetime import datetime
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 from io import StringIO
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import httpx
 from jinja2 import Template
-from rdflib import Graph
+from rdflib import Graph, URIRef
 
 
 async def read_endpoint(filename):
@@ -58,37 +59,37 @@ def setup_logging():
     # Create a timestamp for the log file
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     log_filename = f"load_test_{timestamp}.log"
-    
+
     # Configure logging
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_filename),
-            logging.StreamHandler()
-        ]
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=[logging.FileHandler(log_filename), logging.StreamHandler()],
     )
-    
+
     return log_filename
 
 
 def modify_search_term(url, suffix_length=4):
     """
-    Modify the q= query parameter with a completely random search term
-    of variable length (4-8 characters) for URL-based endpoints
+    Modify the q= query parameter with a realistic search term
+    Format: 1-2 letters followed by 1-4 digits (e.g., W001968, MN02)
     """
-    # Generate completely random search term of variable length (4-8 chars)
-    term_length = random.randint(4, 8)
-    random_search_term = "".join(
-        random.choices(string.ascii_uppercase + string.digits, k=term_length)
-    )
+    # Generate realistic search term: 1-2 letters + 1-4 digits
+    letters_count = random.randint(1, 2)
+    digits_count = random.randint(1, 4)
+
+    letters_part = "".join(random.choices(string.ascii_uppercase, k=letters_count))
+    digits_part = "".join(random.choices(string.digits, k=digits_count))
+
+    realistic_search_term = letters_part + digits_part
 
     # Parse the URL
     parsed = urlparse(url)
     query_params = parse_qs(parsed.query)
 
-    # Update the q parameter with the random search term
-    query_params["q"] = [random_search_term]
+    # Update the q parameter with the realistic search term
+    query_params["q"] = [realistic_search_term]
 
     # Rebuild the URL
     new_query = urlencode(query_params, doseq=True)
@@ -114,24 +115,24 @@ def parse_construct_results(response_text):
         # Parse the response as N-Triples
         graph = Graph()
         graph.parse(source=StringIO(response_text), format="nt")
-        
+
         # Extract all unique IRIs from the graph
         iris = set()
         for subject, predicate, obj in graph:
-            if subject and str(subject).startswith('http'):
+            if subject and str(subject).startswith("http"):
                 iris.add(str(subject))
-            if predicate and str(predicate).startswith('http'):
+            if predicate and str(predicate).startswith("http"):
                 iris.add(str(predicate))
-            if obj and str(obj).startswith('http'):
+            if obj and str(obj).startswith("http"):
                 iris.add(str(obj))
-        
+
         return list(iris)
     except Exception as e:
         logging.error(f"Error parsing construct results: {e}")
         return []
 
 
-def parse_url_results_count(response_text):
+def parse_result_count(response_text):
     """
     Parse URL-based response to extract the number of results
     Parses RDF/Turtle format and looks for prez:count predicate
@@ -140,72 +141,13 @@ def parse_url_results_count(response_text):
         # Try to parse as RDF/Turtle first
         graph = Graph()
         graph.parse(source=StringIO(response_text), format="turtle")
-        
+
         # Look for prez:count predicate
         prez_count_uri = "https://prez.dev/count"
-        for subject, predicate, obj in graph:
-            if str(predicate) == prez_count_uri:
-                try:
-                    return int(obj)
-                except (ValueError, TypeError):
-                    return 0
-        
-        # If no prez:count found, try alternative approaches
-        # Count all statements as results
-        return len(list(graph))
-        
+        return int(next(graph.objects(subject=None, predicate=URIRef(prez_count_uri))))
+
     except Exception as e:
         logging.debug(f"Error parsing RDF results count: {e}")
-        
-        # Fallback: try JSON parsing for backward compatibility
-        try:
-            import json
-            data = json.loads(response_text)
-            if isinstance(data, dict):
-                count_fields = ['totalItems', 'total', 'count', 'numFound', 'results_count']
-                for field in count_fields:
-                    if field in data:
-                        return int(data[field])
-                if 'items' in data:
-                    return len(data['items'])
-                elif 'results' in data:
-                    return len(data['results'])
-        except:
-            pass
-        
-        return 0
-
-
-def parse_sparql_count_result(response_text):
-    """
-    Parse SPARQL JSON response to extract the count result
-    Looks for the count value in SPARQL JSON results format
-    """
-    try:
-        import json
-        data = json.loads(response_text)
-        
-        # SPARQL JSON results format: look in results.bindings
-        if (isinstance(data, dict) and 
-            'results' in data and 
-            'bindings' in data['results'] and
-            len(data['results']['bindings']) > 0):
-            
-            # Get the first binding (there should be only one count result)
-            first_binding = data['results']['bindings'][0]
-            
-            # Look for count variable (could be named 'count', 'callret-0', etc.)
-            for var_name, value_info in first_binding.items():
-                if 'value' in value_info:
-                    try:
-                        return int(value_info['value'])
-                    except ValueError:
-                        return 0
-        
-        return 0
-        
-    except Exception as e:
-        logging.debug(f"Error parsing SPARQL count result: {e}")
         return 0
 
 
@@ -226,11 +168,13 @@ async def make_request(
         request_url = modified_url
         print_url = modified_url
     elif request_type == "sparql":
-        # Generate completely random search term of variable length (4-8 chars)
-        term_length = random.randint(4, 8)
-        search_term = "".join(
-            random.choices(string.ascii_uppercase + string.digits, k=term_length)
-        )
+        # Generate realistic search term: 1-2 letters + 1-4 digits (e.g., W001968, MN02)
+        letters_count = random.randint(1, 2)
+        digits_count = random.randint(1, 4)
+
+        letters_part = "".join(random.choices(string.ascii_uppercase, k=letters_count))
+        digits_part = "".join(random.choices(string.digits, k=digits_count))
+        search_term = letters_part + digits_part
 
         # Generate all SPARQL queries
         construct_template, count_template, anot_template = query_templates
@@ -250,34 +194,29 @@ async def make_request(
                 "Content-Type": "application/sparql-query",
                 "Accept": "application/n-triples",  # Request N-Triples for easier parsing
             }
-            
+
             # Execute construct query
             response1 = await client.post(
                 request_url, content=construct_query, headers=headers
             )
-            
-            # Parse construct results to get IRIs for annotation query
-            iris = []
-            if response1.status_code == 200:
-                iris = parse_construct_results(response1.text)
-            
+            response1.raise_for_status()
+
             # Execute count query
-            headers_count = {
-                "Content-Type": "application/sparql-query",
-                "Accept": "application/json",
-            }
             response2 = await client.post(
-                request_url, content=count_query, headers=headers_count
+                request_url, content=count_query, headers=headers
             )
-            
+            response2.raise_for_status()
+
             # Parse count query result
-            count_result = 0
-            if response2.status_code == 200:
-                count_result = parse_sparql_count_result(response2.text)
-            
-            # Execute annotation query if we have IRIs
+            count_result = parse_result_count(response2.text)
+
+            # Execute annotation query only if count_result > 0
             response3 = None
-            if iris:
+            if count_result > 0:
+                # Parse construct results to get IRIs for annotation query
+                iris = []
+                iris = parse_construct_results(response1.text)
+
                 anot_query = generate_annotation_query(anot_template, iris)
                 headers_anot = {
                     "Content-Type": "application/sparql-query",
@@ -286,11 +225,11 @@ async def make_request(
                 response3 = await client.post(
                     request_url, content=anot_query, headers=headers_anot
                 )
-            
+
             # Use the combined duration and average status
             end_time = asyncio.get_event_loop().time()
             duration = end_time - start_time
-            
+
             # Calculate average status code
             status_codes = [response1.status_code, response2.status_code]
             if response3:
@@ -303,11 +242,11 @@ async def make_request(
             end_time = asyncio.get_event_loop().time()
             duration = end_time - start_time
             status = response.status_code
-            
+
             # Parse result count for URL-based requests
             result_count = 0
             if response.status_code == 200:
-                result_count = parse_url_results_count(response.text)
+                result_count = parse_result_count(response.text)
 
         logging.info(
             f"User {user_id:2d} Request {request_num:2d}: {status} in {duration:.3f}s - {print_url}"
@@ -320,17 +259,16 @@ async def make_request(
             "duration": duration,
             "url": print_url,
         }
-        
+
         # Add additional info for SPARQL requests
         if request_type == "sparql":
-            result["iris_found"] = len(iris)
             result["annotation_query_executed"] = response3 is not None
             result["count_result"] = count_result
-        
+
         # Add result count for URL requests
         if request_type == "url":
             result["result_count"] = result_count
-        
+
         return result
 
     except Exception as e:
@@ -393,7 +331,9 @@ async def run_single_load_test(
     )
     logging.info(f"Base URL: {base_url}")
     if request_type == "sparql":
-        logging.info("Using constructQuery.rq, countQuery.rq, and anotQuery.rq templates")
+        logging.info(
+            "Using constructQuery.rq, countQuery.rq, and anotQuery.rq templates"
+        )
     logging.info("-" * 80)
 
     # Create tasks for all users
@@ -428,7 +368,9 @@ async def run_single_load_test(
     logging.info(f"Successful requests: {len(successful_requests)}")
     logging.info(f"Failed requests: {len(failed_requests)}")
     if request_type == "sparql":
-        logging.info(f"Note: Each request executes 3 SPARQL queries (construct + count + annotation)")
+        logging.info(
+            f"Note: Each request executes 3 SPARQL queries (construct + count + annotation)"
+        )
 
     if durations:
         logging.info(f"Average response time: {sum(durations) / len(durations):.3f}s")
@@ -437,10 +379,16 @@ async def run_single_load_test(
 
     # Result count statistics for URL-based requests
     if request_type == "url":
-        result_counts = [r["result_count"] for r in successful_requests if r.get("result_count") is not None]
+        result_counts = [
+            r["result_count"]
+            for r in successful_requests
+            if r.get("result_count") is not None
+        ]
         if result_counts:
             logging.info(f"Result count statistics:")
-            logging.info(f"  Average results per query: {sum(result_counts) / len(result_counts):.1f}")
+            # Calculate median (middle value)
+            median_count = statistics.median(result_counts)
+            logging.info(f"  Median results per query: {median_count}")
             logging.info(f"  Minimum results per query: {min(result_counts)}")
             logging.info(f"  Maximum results per query: {max(result_counts)}")
 
@@ -450,22 +398,29 @@ async def run_single_load_test(
             logging.info(
                 f"  User {result['user_id']} Request {result['request_num']}: {result['error']}"
             )
-    
+
     # Additional stats for SPARQL requests
     if request_type == "sparql":
-        successful_sparql_requests = [r for r in successful_requests if r.get("count_result") is not None]
+        successful_sparql_requests = [
+            r for r in successful_requests if r.get("count_result") is not None
+        ]
         if successful_sparql_requests:
             count_results = [r["count_result"] for r in successful_sparql_requests]
-            total_iris = sum(r["iris_found"] for r in successful_sparql_requests)
-            avg_iris = total_iris / len(successful_sparql_requests)
-            annotation_queries = sum(1 for r in successful_sparql_requests if r.get("annotation_query_executed"))
-            
+            annotation_queries = sum(
+                1
+                for r in successful_sparql_requests
+                if r.get("annotation_query_executed")
+            )
+
             logging.info(f"SPARQL-specific statistics:")
-            logging.info(f"  Average count per query: {sum(count_results) / len(count_results):.1f}")
+            # Calculate median (middle value)
+            median_count = statistics.median(count_results)
+            logging.info(f"  Median count per query: {median_count}")
             logging.info(f"  Minimum count per query: {min(count_results)}")
             logging.info(f"  Maximum count per query: {max(count_results)}")
-            logging.info(f"  Average IRIs found per request: {avg_iris:.1f}")
-            logging.info(f"  Annotation queries executed: {annotation_queries}/{len(successful_sparql_requests)}")
+            logging.info(
+                f"  Annotation queries executed: {annotation_queries}/{len(successful_sparql_requests)}"
+            )
 
     return {
         "name": test_name,
@@ -480,8 +435,8 @@ async def run_single_load_test(
 
 async def run_load_test():
     """Run the complete load test for prez, localhost, and fuseki endpoints"""
-    num_users = 30
-    requests_per_user = 5
+    num_users = 5
+    requests_per_user = 1
 
     # Setup logging
     log_filename = setup_logging()
@@ -533,7 +488,9 @@ async def run_load_test():
         logging.info(f"  Total requests: {localhost_results['total_requests']}")
         logging.info(f"  Successful: {localhost_results['successful_requests']}")
         logging.info(f"  Failed: {localhost_results['failed_requests']}")
-        logging.info(f"  Avg response time: {localhost_results['avg_response_time']:.3f}s")
+        logging.info(
+            f"  Avg response time: {localhost_results['avg_response_time']:.3f}s"
+        )
 
     if fuseki_results:
         logging.info(f"Fuseki Endpoint Results:")
