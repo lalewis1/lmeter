@@ -2,8 +2,9 @@
 """
 HTTPX-based load test utility that simulates 30 users making 5 requests each
 to the endpoints specified in prez_endpoint.txt, localhost_endpoint.txt, and fuseki_endpoint.txt.
-For prez and localhost endpoints: uses URL-based search with varied search terms.
-For fuseki endpoint: uses SPARQL queries with templated search terms (constructQuery.rq and countQuery.rq).
+For prez and localhost endpoints: uses URL-based search with varied search terms, parses RDF responses for prez:count predicate.
+For fuseki endpoint: uses SPARQL queries with templated search terms (constructQuery.rq and countQuery.rq), parses count query results.
+Reports average/min/max response times and result counts for each test case.
 """
 
 import asyncio
@@ -130,6 +131,84 @@ def parse_construct_results(response_text):
         return []
 
 
+def parse_url_results_count(response_text):
+    """
+    Parse URL-based response to extract the number of results
+    Parses RDF/Turtle format and looks for prez:count predicate
+    """
+    try:
+        # Try to parse as RDF/Turtle first
+        graph = Graph()
+        graph.parse(source=StringIO(response_text), format="turtle")
+        
+        # Look for prez:count predicate
+        prez_count_uri = "https://prez.dev/count"
+        for subject, predicate, obj in graph:
+            if str(predicate) == prez_count_uri:
+                try:
+                    return int(obj)
+                except (ValueError, TypeError):
+                    return 0
+        
+        # If no prez:count found, try alternative approaches
+        # Count all statements as results
+        return len(list(graph))
+        
+    except Exception as e:
+        logging.debug(f"Error parsing RDF results count: {e}")
+        
+        # Fallback: try JSON parsing for backward compatibility
+        try:
+            import json
+            data = json.loads(response_text)
+            if isinstance(data, dict):
+                count_fields = ['totalItems', 'total', 'count', 'numFound', 'results_count']
+                for field in count_fields:
+                    if field in data:
+                        return int(data[field])
+                if 'items' in data:
+                    return len(data['items'])
+                elif 'results' in data:
+                    return len(data['results'])
+        except:
+            pass
+        
+        return 0
+
+
+def parse_sparql_count_result(response_text):
+    """
+    Parse SPARQL JSON response to extract the count result
+    Looks for the count value in SPARQL JSON results format
+    """
+    try:
+        import json
+        data = json.loads(response_text)
+        
+        # SPARQL JSON results format: look in results.bindings
+        if (isinstance(data, dict) and 
+            'results' in data and 
+            'bindings' in data['results'] and
+            len(data['results']['bindings']) > 0):
+            
+            # Get the first binding (there should be only one count result)
+            first_binding = data['results']['bindings'][0]
+            
+            # Look for count variable (could be named 'count', 'callret-0', etc.)
+            for var_name, value_info in first_binding.items():
+                if 'value' in value_info:
+                    try:
+                        return int(value_info['value'])
+                    except ValueError:
+                        return 0
+        
+        return 0
+        
+    except Exception as e:
+        logging.debug(f"Error parsing SPARQL count result: {e}")
+        return 0
+
+
 def generate_annotation_query(template_content, iris):
     """
     Generate an annotation SPARQL query by templating the list of IRIs
@@ -191,6 +270,11 @@ async def make_request(
                 request_url, content=count_query, headers=headers_count
             )
             
+            # Parse count query result
+            count_result = 0
+            if response2.status_code == 200:
+                count_result = parse_sparql_count_result(response2.text)
+            
             # Execute annotation query if we have IRIs
             response3 = None
             if iris:
@@ -219,6 +303,11 @@ async def make_request(
             end_time = asyncio.get_event_loop().time()
             duration = end_time - start_time
             status = response.status_code
+            
+            # Parse result count for URL-based requests
+            result_count = 0
+            if response.status_code == 200:
+                result_count = parse_url_results_count(response.text)
 
         logging.info(
             f"User {user_id:2d} Request {request_num:2d}: {status} in {duration:.3f}s - {print_url}"
@@ -236,6 +325,11 @@ async def make_request(
         if request_type == "sparql":
             result["iris_found"] = len(iris)
             result["annotation_query_executed"] = response3 is not None
+            result["count_result"] = count_result
+        
+        # Add result count for URL requests
+        if request_type == "url":
+            result["result_count"] = result_count
         
         return result
 
@@ -341,6 +435,15 @@ async def run_single_load_test(
         logging.info(f"Minimum response time: {min(durations):.3f}s")
         logging.info(f"Maximum response time: {max(durations):.3f}s")
 
+    # Result count statistics for URL-based requests
+    if request_type == "url":
+        result_counts = [r["result_count"] for r in successful_requests if r.get("result_count") is not None]
+        if result_counts:
+            logging.info(f"Result count statistics:")
+            logging.info(f"  Average results per query: {sum(result_counts) / len(result_counts):.1f}")
+            logging.info(f"  Minimum results per query: {min(result_counts)}")
+            logging.info(f"  Maximum results per query: {max(result_counts)}")
+
     if failed_requests:
         logging.info("Failed requests details:")
         for result in failed_requests:
@@ -350,13 +453,17 @@ async def run_single_load_test(
     
     # Additional stats for SPARQL requests
     if request_type == "sparql":
-        successful_sparql_requests = [r for r in successful_requests if r.get("iris_found") is not None]
+        successful_sparql_requests = [r for r in successful_requests if r.get("count_result") is not None]
         if successful_sparql_requests:
+            count_results = [r["count_result"] for r in successful_sparql_requests]
             total_iris = sum(r["iris_found"] for r in successful_sparql_requests)
             avg_iris = total_iris / len(successful_sparql_requests)
             annotation_queries = sum(1 for r in successful_sparql_requests if r.get("annotation_query_executed"))
             
             logging.info(f"SPARQL-specific statistics:")
+            logging.info(f"  Average count per query: {sum(count_results) / len(count_results):.1f}")
+            logging.info(f"  Minimum count per query: {min(count_results)}")
+            logging.info(f"  Maximum count per query: {max(count_results)}")
             logging.info(f"  Average IRIs found per request: {avg_iris:.1f}")
             logging.info(f"  Annotation queries executed: {annotation_queries}/{len(successful_sparql_requests)}")
 
