@@ -1,0 +1,281 @@
+CONSTRUCT {
+  [] <https://prez.dev/count> ?count_str .
+}
+WHERE {
+  {
+    SELECT (COUNT(?focus_node) AS ?count)
+    WHERE {
+      SELECT DISTINCT ?focus_node
+      WHERE {
+        {
+          {
+            ( ?fts_search_node ?weight ?match ?g ?pred ) <http://jena.apache.org/text#query> ( <https://schema.org/value> <http://www.w3.org/2000/01/rdf-schema#label> <https://schema.org/name> <http://purl.org/dc/terms/title> <https://schema.org/description> <https://schema.org/comment> <https://schema.org/abstract> "{{ search_term }}" 500 ) .
+            {
+              FILTER (bound(?fts_search_node))
+              ?focus_node <https://schema.org/identifier> ?fts_search_node .
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <https://schema.org/about> ?focus_node .
+              FILTER (!isBlank(?focus_node))
+              ?focus_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://schema.org/Report> .
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?focus_node <http://www.w3.org/ns/dcat#distribution> ?fts_search_node .
+              FILTER (!isBlank(?focus_node))
+              ?focus_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://schema.org/Report> .
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?focus_node <http://www.w3.org/ns/dcat#distribution> ?fts_search_node .
+              FILTER (!isBlank(?focus_node))
+              ?focus_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://schema.org/Report> .
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?focus_node <http://www.w3.org/ns/dcat#resource> ?fts_search_node .
+              FILTER (!isBlank(?focus_node))
+              ?focus_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/def/bore/Drillhole> .
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?focus_node <http://www.w3.org/ns/dcat#resource> ?fts_search_node .
+              FILTER (!isBlank(?focus_node))
+              ?focus_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/def/bore/Drillhole> .
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node_1 <http://www.w3.org/ns/dx/prof/hasResource> ?fts_search_node .
+              FILTER (bound(?fts_search_node_1))
+              ?fts_search_node_1 <http://www.w3.org/ns/sosa/isSampleOf> ?focus_node .
+              FILTER (!isBlank(?focus_node))
+              ?focus_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/def/bore/Drillhole> .
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node_1 <http://www.opengis.net/ont/geosparql#sfWithin> ?fts_search_node .
+              FILTER (bound(?fts_search_node_1))
+              ?fts_search_node_1 <http://purl.org/dc/terms/hasPart> ?focus_node .
+              FILTER (!isBlank(?focus_node))
+              ?focus_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/def/bore/Borehole> .
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?focus_node <https://schema.org/alternateName> ?fts_search_node .
+              FILTER (!isBlank(?focus_node))
+              ?focus_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/def/bore/Bore> .
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://purl.org/dc/terms/hasPart> ?focus_node .
+              FILTER (!isBlank(?focus_node))
+              ?focus_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://schema.org/Report> .
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?focus_node <https://linked.data.gov.au/dataset/gswa/hasTectonicUnit> ?fts_search_node .
+              FILTER (!isBlank(?focus_node))
+              ?focus_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/dataset/gswa/Site> .
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?focus_node <https://linked.data.gov.au/dataset/gswa/hasAttachment> ?fts_search_node .
+              FILTER (!isBlank(?focus_node))
+              ?focus_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/dataset/gswa/Site> .
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?focus_node <https://linked.data.gov.au/dataset/gswa/hasTenement> ?fts_search_node .
+              FILTER (!isBlank(?focus_node))
+              ?focus_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/dataset/gswa/Site> .
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://schema.org/Report> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/def/bore/Bore> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/def/bore/Borehole> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/def/bore/Borehole> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/def/bore/Borehole> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/def/bore/Borehole> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/def/geofh/SurfaceSite> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/dataset/gswa/Facility> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/dataset/gswa/Field> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/dataset/gswa/GroupSite> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/dataset/gswa/LoggingRun> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/dataset/gswa/Project> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/dataset/gswa/Reprocess> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/dataset/gswa/ResourceEstimate> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/dataset/gswa/SeismicLine> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/dataset/gswa/Survey> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/dataset/gswa/SurveyData> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/dataset/gswa/Tenement> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/dataset/gswa/Title> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://linked.data.gov.au/dataset/gswa/WellLog> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://schema.org/Event> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://schema.org/ImageObject> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://schema.org/Project> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+            UNION
+            {
+              FILTER (bound(?fts_search_node))
+              ?fts_search_node <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/sosa/ObservationCollection> .
+              BIND (?fts_search_node AS ?focus_node)
+              FILTER (!isBlank(?focus_node))
+            }
+          }
+        }
+      }
+      LIMIT 501
+    }
+  }
+  BIND (IF(?count = 501, ">500", str(?count)) AS ?count_str)
+}
