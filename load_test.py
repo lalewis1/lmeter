@@ -196,22 +196,31 @@ async def make_request(
             }
 
             # Execute construct query
+            construct_start = asyncio.get_event_loop().time()
             response1 = await client.post(
                 request_url, content=construct_query, headers=headers
             )
+            construct_end = asyncio.get_event_loop().time()
             response1.raise_for_status()
+            construct_duration = construct_end - construct_start
 
             # Execute count query
+            count_start = asyncio.get_event_loop().time()
             response2 = await client.post(
                 request_url, content=count_query, headers=headers
             )
+            count_end = asyncio.get_event_loop().time()
             response2.raise_for_status()
+            count_duration = count_end - count_start
 
             # Parse count query result
             count_result = parse_result_count(response2.text)
 
+            # Processing time between count and annotation query
+            processing_start = asyncio.get_event_loop().time()
             # Execute annotation query only if count_result > 0
             response3 = None
+            annotation_duration = 0
             if count_result > 0:
                 # Parse construct results to get IRIs for annotation query
                 iris = []
@@ -222,9 +231,15 @@ async def make_request(
                     "Content-Type": "application/sparql-query",
                     "Accept": "application/n-triples",
                 }
+                annotation_start = asyncio.get_event_loop().time()
                 response3 = await client.post(
                     request_url, content=anot_query, headers=headers_anot
                 )
+                annotation_end = asyncio.get_event_loop().time()
+                annotation_duration = annotation_end - annotation_start
+
+            processing_end = asyncio.get_event_loop().time()
+            processing_duration = processing_end - processing_start
 
             # Use the combined duration and average status
             end_time = asyncio.get_event_loop().time()
@@ -264,6 +279,11 @@ async def make_request(
         if request_type == "sparql":
             result["annotation_query_executed"] = response3 is not None
             result["count_result"] = count_result
+            result["construct_duration"] = construct_duration
+            result["count_duration"] = count_duration
+            result["processing_duration"] = processing_duration
+            if response3:
+                result["annotation_duration"] = annotation_duration
 
         # Add result count for URL requests
         if request_type == "url":
@@ -422,6 +442,60 @@ async def run_single_load_test(
                 f"  Annotation queries executed: {annotation_queries}/{len(successful_sparql_requests)}"
             )
 
+            # Detailed timing statistics for SPARQL queries
+            construct_durations = [
+                r["construct_duration"] for r in successful_sparql_requests
+            ]
+            count_durations = [r["count_duration"] for r in successful_sparql_requests]
+            processing_durations = [
+                r["processing_duration"] for r in successful_sparql_requests
+            ]
+
+            logging.info(f"\nDetailed timing statistics:")
+
+            # Construct query timing
+            if construct_durations:
+                logging.info(f"Construct query timing:")
+                logging.info(
+                    f"  Average: {sum(construct_durations) / len(construct_durations):.3f}s"
+                )
+                logging.info(f"  Minimum: {min(construct_durations):.3f}s")
+                logging.info(f"  Maximum: {max(construct_durations):.3f}s")
+
+            # Count query timing
+            if count_durations:
+                logging.info(f"Count query timing:")
+                logging.info(
+                    f"  Average: {sum(count_durations) / len(count_durations):.3f}s"
+                )
+                logging.info(f"  Minimum: {min(count_durations):.3f}s")
+                logging.info(f"  Maximum: {max(count_durations):.3f}s")
+
+            # Processing time between queries
+            if processing_durations:
+                logging.info(f"Processing time (between count and annotation):")
+                logging.info(
+                    f"  Average: {sum(processing_durations) / len(processing_durations):.3f}s"
+                )
+                logging.info(f"  Minimum: {min(processing_durations):.3f}s")
+                logging.info(f"  Maximum: {max(processing_durations):.3f}s")
+
+            # Annotation query timing (only for requests that executed annotation queries)
+            annotation_durations = [
+                r["annotation_duration"]
+                for r in successful_sparql_requests
+                if r.get("annotation_duration", 0) > 0
+            ]
+            if annotation_durations:
+                logging.info(
+                    f"Annotation query timing (executed {len(annotation_durations)} times):"
+                )
+                logging.info(
+                    f"  Average: {sum(annotation_durations) / len(annotation_durations):.3f}s"
+                )
+                logging.info(f"  Minimum: {min(annotation_durations):.3f}s")
+                logging.info(f"  Maximum: {max(annotation_durations):.3f}s")
+
     return {
         "name": test_name,
         "total_requests": len(flat_results),
@@ -435,8 +509,8 @@ async def run_single_load_test(
 
 async def run_load_test():
     """Run the complete load test for prez, localhost, and fuseki endpoints"""
-    num_users = 5
-    requests_per_user = 1
+    num_users = 30
+    requests_per_user = 5
 
     # Setup logging
     log_filename = setup_logging()
