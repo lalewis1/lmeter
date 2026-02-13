@@ -451,7 +451,7 @@ async def run_single_load_test(
                 r["processing_duration"] for r in successful_sparql_requests
             ]
 
-            logging.info(f"\nDetailed timing statistics:")
+            logging.info(f"Detailed timing statistics:")
 
             # Construct query timing
             if construct_durations:
